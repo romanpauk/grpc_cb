@@ -21,9 +21,12 @@ endif()
 
 add_library(grpc_cb INTERFACE)
 target_include_directories(grpc_cb INTERFACE include)
-target_link_libraries(grpc_cb INTERFACE grpc)
+target_link_libraries(grpc_cb INTERFACE grpc++ grpc)
 
 target_sources(grpc_cb INTERFACE
+    include/grpc_cb/deadline_timer.h
+    include/grpc_cb/io_context.h
+    include/grpc_cb/io_handler.h
     README.md
 )
 
@@ -33,6 +36,6 @@ if(GRPCCB_ENABLE_TESTING)
     )
 
     add_test(NAME grpc_cb_test COMMAND grpc_cb_test)
-    target_link_libraries(grpc_cb_test grpc_cb gtest_main)
+    target_link_libraries(grpc_cb_test grpc_cb gtest_main grpc)
     target_include_directories(grpc_cb_test PRIVATE test)
 endif()
