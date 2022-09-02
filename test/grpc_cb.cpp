@@ -51,7 +51,8 @@ TEST(io_context, post)
     int counter = 0;
     context.post([&]{ ++counter; });
     context.post([&]{ ++counter; });
-    EXPECT_EQ(context.run_one(), 2);
+    EXPECT_EQ(context.run_one(), 1);
+    EXPECT_EQ(context.run_one(), 1);
     EXPECT_EQ(counter, 2);
 }
 
