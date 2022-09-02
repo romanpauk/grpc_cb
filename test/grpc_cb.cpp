@@ -5,10 +5,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 
+#include <grpc_cb/steady_timer.h>
+
 #include <gtest/gtest.h>
 #include <optional>
-
-#include <grpc_cb/steady_timer.h>
+#include <thread>
 
 TEST(deadline_timer, dtor_cancel)
 {
