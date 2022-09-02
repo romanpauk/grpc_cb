@@ -1,5 +1,4 @@
 #include <grpc_cb/steady_timer.h>
-#include <benchmark/benchmark.h>
 
 #include <grpcpp/alarm.h>
 #include <grpcpp/completion_queue.h>
@@ -9,6 +8,8 @@
 #include <asio/steady_timer.hpp>
 #endif
 
+#include <benchmark/benchmark.h>
+
 static void grpc_alarm(benchmark::State& state)
 {
     grpc::CompletionQueue cq;
@@ -16,7 +17,8 @@ static void grpc_alarm(benchmark::State& state)
 
     for (auto _ : state)
     {
-        // gpr_now(), gpr_time_0(GPR_TIMESPAN)
+        // gpr_now(),
+        // gpr_time_0(GPR_TIMESPAN)
         alarm.Set(&cq, gpr_time_from_seconds(0, GPR_TIMESPAN), &alarm);
         void* tag;
         bool ok;

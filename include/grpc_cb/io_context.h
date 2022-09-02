@@ -61,6 +61,7 @@ namespace grpc_cb
         template < typename Handler > auto make_handler(Handler&& handler)
         {
             // Return handler as pointer to base class so no casting is required before calling process().
+            // TODO: reuse memory for the handlers that are of some reasonable size.
             return std::unique_ptr< io_handler_base >(std::make_unique< io_handler< Handler > >(std::forward< Handler >(handler)));
         }
 
