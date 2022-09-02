@@ -9,6 +9,7 @@
 #endif
 
 #include <benchmark/benchmark.h>
+#include <thread>
 
 #define benchmark_assert(...) do { if(!(__VA_ARGS__)) std::abort(); } while(0)
 
