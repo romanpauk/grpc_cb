@@ -23,7 +23,8 @@ namespace grpc_cb
 
         template < typename Duration > void expires_from_now(Duration duration)
         {
-            // There is expires_from_now and async_wait to mimic asio contract.
+            // There is both expires_from_now and async_wait to mimic asio contract.
+            // yet it requires two member variables which is unfortunate.
             cancel();
             deadline_ = gpr_time_from_nanos(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count(),
@@ -44,6 +45,8 @@ namespace grpc_cb
             tag.release();
         }
 
+        // TODO: cancel should return if handler was cancelled or not. But there is no way
+        // to find out.
         void cancel()
         {
             alarm_.Cancel();

@@ -44,3 +44,25 @@ TEST(deadline_timer, async_wait)
     EXPECT_EQ(context.run_one(), 1);
     EXPECT_EQ(result, true);
 }
+
+TEST(io_context, post)
+{
+    grpc_cb::io_context context;
+    int counter = 0;
+    context.post([&]{ ++counter; });
+    context.post([&]{ ++counter; });
+    EXPECT_EQ(context.poll_one(), 2);
+    EXPECT_EQ(counter, 2);
+}
+
+TEST(io_context, post_cancel)
+{
+    int counter = 0;
+    {
+        grpc_cb::io_context context;
+        context.post([&] { ++counter; });
+        context.post([&] { ++counter; });
+    }
+
+    EXPECT_EQ(counter, 0);
+}
