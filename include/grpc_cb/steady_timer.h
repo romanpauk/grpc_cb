@@ -9,14 +9,14 @@
 
 namespace grpc_cb
 {
-    class deadline_timer
+    class steady_timer
     {
     public:
-        deadline_timer(io_context& context)
+        steady_timer(io_context& context)
             : context_(context)
         {}
 
-        ~deadline_timer()
+        ~steady_timer()
         {
             cancel();
         }
@@ -39,8 +39,8 @@ namespace grpc_cb
             // types of handlers, but most of them will have the same size, so we can just ugly-cast
             // for some common size and cache the underlying memory allocations in stack<>.
 
-            auto tag = std::make_unique< io_handler< WaitHandler > >(std::forward< WaitHandler >(handler));
-            alarm_.Set(context_, deadline_, static_cast<io_handler_base*>(tag.get()));
+            auto tag = context_.make_handler(std::forward< WaitHandler >(handler));
+            alarm_.Set(context_, deadline_, tag.get());
             tag.release();
         }
 

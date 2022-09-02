@@ -40,7 +40,7 @@ TEST(deadline_timer, async_wait)
     timer.expires_from_now(std::chrono::seconds(0));
     timer.async_wait([&](bool res) { result = res; });
 
-    // TODO: does not work with poll_one(). Yet queuing of expired handler makes it ready by definition (should?).
+    // TODO: does not work with poll_one(). Yet queuing of expired handler makes it ready by definition (in asio, it does)
     EXPECT_EQ(context.run_one(), 1);
     EXPECT_EQ(result, true);
 }

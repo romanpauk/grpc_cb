@@ -5,6 +5,8 @@
 #include <grpcpp/completion_queue.h>
 #include <grpcpp/alarm.h>
 
+#include <memory>
+
 namespace grpc_cb
 {
     class io_context
@@ -24,7 +26,7 @@ namespace grpc_cb
             bool ok = false;
             if (cq_.Next(&tag, &ok))
             {
-                auto handler = std::unique_ptr< io_handler_base >(reinterpret_cast<io_handler_base*>(tag));
+                auto handler = handler_cast(tag);
                 handler->process(ok);
                 return 1;
             }
@@ -39,7 +41,7 @@ namespace grpc_cb
             const auto status = cq_.AsyncNext(&tag, &ok, gpr_now(GPR_CLOCK_PRECISE));
             if (status == grpc::CompletionQueue::GOT_EVENT)
             {
-                auto handler = std::unique_ptr< io_handler_base >(reinterpret_cast<io_handler_base*>(tag));
+                auto handler = handler_cast(tag);
                 handler->process(ok);
                 return 1;
             }
@@ -56,7 +58,21 @@ namespace grpc_cb
             return count;
         }
 
+        template < typename Handler > auto make_handler(Handler&& handler)
+        {
+            // Return handler as pointer to base class so no casting is required before calling process().
+            return std::unique_ptr< io_handler_base >(std::make_unique< io_handler< Handler > >(std::forward< Handler >(handler)));
+        }
+
+        // TODO
+        template < typename Handler > void post(Handler&& handler);
+
     private:
+        std::unique_ptr< io_handler_base > handler_cast(void* tag)
+        {
+            return std::unique_ptr< io_handler_base >(reinterpret_cast<io_handler_base*>(tag));
+        }
+
         grpc::CompletionQueue cq_;
     };
 }
