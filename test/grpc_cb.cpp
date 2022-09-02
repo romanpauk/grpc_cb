@@ -8,14 +8,14 @@
 #include <gtest/gtest.h>
 #include <optional>
 
-#include <grpc_cb/deadline_timer.h>
+#include <grpc_cb/steady_timer.h>
 
 TEST(deadline_timer, dtor_cancel)
 {
     grpc_cb::io_context context;
     std::optional< bool > result;
     {
-        grpc_cb::deadline_timer timer(context);
+        grpc_cb::steady_timer timer(context);
         timer.expires_from_now(std::chrono::seconds(10));
         timer.async_wait([&](bool res) { result = res; });
     }
@@ -26,7 +26,7 @@ TEST(deadline_timer, dtor_cancel)
 TEST(deadline_timer, async_wait)
 {
     grpc_cb::io_context context;
-    grpc_cb::deadline_timer timer(context);
+    grpc_cb::steady_timer timer(context);
 
     std::optional< bool > result = true;
     timer.expires_from_now(std::chrono::seconds(10));

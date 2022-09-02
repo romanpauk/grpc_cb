@@ -48,10 +48,11 @@ static void asio_steady_timer(benchmark::State& state)
     asio::io_context context;
     asio::steady_timer timer(context);
 
+    volatile int counter = 0;
     for (auto _ : state)
     {
         timer.expires_from_now(std::chrono::seconds(0));
-        timer.async_wait([](const asio::error_code&) {});
+        timer.async_wait([&](const asio::error_code&) { ++counter; });
         context.run_one();
     }
 
