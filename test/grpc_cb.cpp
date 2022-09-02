@@ -57,14 +57,27 @@ TEST(io_context, post)
 
 TEST(io_context, post_cancel)
 {
+    struct Dtor
+    {
+        Dtor(int& dtor): dtor_(dtor) {}
+        ~Dtor() { ++dtor_; }
+        int& dtor_;
+    };
+
+    int dtor = 0;
     int counter = 0;
     {
         grpc_cb::io_context context;
-        context.post([&] { ++counter; });
-        context.post([&] { ++counter; });
+
+        // Check that handler capture gets freed
+        auto d = std::make_shared< Dtor >(dtor); // TODO: should work with unique
+        context.post([&, d=std::move(d)] { ++counter; });
+        EXPECT_EQ(counter, 0);
+        EXPECT_EQ(dtor, 0);
     }
 
     EXPECT_EQ(counter, 0);
+    EXPECT_EQ(dtor, 1);
 }
 
 TEST(io_context, stop)

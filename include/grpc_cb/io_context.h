@@ -50,7 +50,7 @@ namespace grpc_cb
                 handlers_.emplace_back(std::forward< Handler >(handler));
             }
             if (empty)
-                handlers_alarm_.Set(&cq_, gpr_now(GPR_CLOCK_PRECISE), &handlers_alarm_);
+                handlers_alarm_.Set(&cq_, gpr_zero_timespec(), &handlers_alarm_);
         }
 
         void stop()
