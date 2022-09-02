@@ -19,7 +19,7 @@ TEST(deadline_timer, dtor_cancel)
         timer.expires_from_now(std::chrono::seconds(10));
         timer.async_wait([&](bool res) { result = res; });
     }
-    EXPECT_EQ(context.poll_one(), 1);
+    EXPECT_EQ(context.run_one(), 1);
     EXPECT_EQ(result, false);
 }
 
@@ -31,16 +31,16 @@ TEST(deadline_timer, async_wait)
     std::optional< bool > result = true;
     timer.expires_from_now(std::chrono::seconds(10));
     timer.async_wait([&](bool res) { result = res; });
-    
-    EXPECT_EQ(context.poll_one(), 0);
+
+    // TODO: poll_one is a bit racy, it could return 0 because it would
+    // not yet see async_wait().
+    //EXPECT_EQ(context.poll_one(), 0);
     timer.cancel();
-    EXPECT_EQ(context.poll_one(), 1);
+    EXPECT_EQ(context.run_one(), 1);
     EXPECT_EQ(result, false);
 
     timer.expires_from_now(std::chrono::seconds(0));
     timer.async_wait([&](bool res) { result = res; });
-
-    // TODO: does not work with poll_one(). Yet queuing of expired handler makes it ready by definition (in asio, it does)
     EXPECT_EQ(context.run_one(), 1);
     EXPECT_EQ(result, true);
 }
@@ -51,7 +51,7 @@ TEST(io_context, post)
     int counter = 0;
     context.post([&]{ ++counter; });
     context.post([&]{ ++counter; });
-    EXPECT_EQ(context.poll_one(), 2);
+    EXPECT_EQ(context.run_one(), 2);
     EXPECT_EQ(counter, 2);
 }
 
@@ -65,4 +65,12 @@ TEST(io_context, post_cancel)
     }
 
     EXPECT_EQ(counter, 0);
+}
+
+TEST(io_context, stop)
+{
+    grpc_cb::io_context context;
+    std::thread thread([&]{ context.run(); });
+    context.stop();
+    thread.join();
 }

@@ -34,11 +34,12 @@ namespace grpc_cb
         template< typename WaitHandler > void async_wait(WaitHandler&& handler)
         {
             // Cancels are async, so to support cancel/async_wait/cancel/async_wait,
-            // handlers have to be owned by io_context and submitted under different tags.
+            // handlers have to be owned by io_context and submitted under different tags
+            // (this is a reason we cannot simply have virtual process(bool) on this class).
 
             // TODO: now how to get rid of the new() here... we need to accomodate for different
-            // types of handlers, but most of them will have the same size, so we can just ugly-cast
-            // for some common size and cache the underlying memory allocations in stack<>.
+            // types of handlers, but most of them will have some reasonable size, so we can just
+            // ugly-cast it and cache the underlying memory allocations in stack<>.
 
             auto tag = context_.make_handler(std::forward< WaitHandler >(handler));
             alarm_.Set(context_, deadline_, tag.get());

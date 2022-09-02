@@ -7,61 +7,33 @@
 
 #include <memory>
 #include <deque>
+#include <type_traits>
 
 namespace grpc_cb
 {
+    bool operator == (gpr_timespec lhs, gpr_timespec rhs)
+    {
+        static_assert(std::is_pod_v< gpr_timespec >);
+        return memcmp(&lhs, &rhs, sizeof(lhs)) == 0;
+    }
+
     class io_context
     {
     public:
         ~io_context()
         {
-            handlers_alarm_.Cancel();
-            cq_.Shutdown();
-
-            while (true)
-            {
-                void* tag;
-                bool ok;
-                const auto status = cq_.AsyncNext(&tag, &ok, gpr_now(GPR_CLOCK_PRECISE));
-                if (status == grpc::CompletionQueue::GOT_EVENT)
-                    dispatch(tag, ok);
-                else if(status == grpc::CompletionQueue::SHUTDOWN)
-                    break;
-            }
+            stop();
         }
 
         operator grpc::CompletionQueue* () { return &cq_; }
 
-        size_t run_one()
-        {
-            void* tag = 0;
-            bool ok = false;
-            if (cq_.Next(&tag, &ok))
-                return dispatch(tag, ok);
+        size_t run_one() { return async_next(gpr_infinite_timespec(), 1); }
+        size_t run() { return async_next(gpr_infinite_timespec(), -1); }
 
-            return 0;
-        }
+        // TODO: can't get those correct due to race to be usable in tests
+        //size_t poll_one() { return async_next(gpr_zero_timespec(), 1); }
+        //size_t poll() { return async_next(gpr_zero_timespec(), -1); }
         
-        size_t poll_one()
-        {
-            void* tag = 0;
-            bool ok = false;
-            const auto status = cq_.AsyncNext(&tag, &ok, gpr_now(GPR_CLOCK_PRECISE));
-            if (status == grpc::CompletionQueue::GOT_EVENT)
-                return dispatch(tag, ok);
-
-            return 0;
-        }
-
-        size_t poll()
-        {
-            size_t count = 0;
-            while (size_t n = poll_one())
-                count += n;
-
-            return count;
-        }
-
         template < typename Handler > auto make_handler(Handler&& handler)
         {
             // Return handler as pointer to base class so no casting is required before calling process().
@@ -81,10 +53,43 @@ namespace grpc_cb
                 handlers_alarm_.Set(&cq_, gpr_now(GPR_CLOCK_PRECISE), &handlers_alarm_);
         }
 
-    private:
-        std::unique_ptr< io_handler_base > handler_cast(void* tag)
+        void stop()
         {
-            return std::unique_ptr< io_handler_base >(reinterpret_cast<io_handler_base*>(tag));
+            handlers_alarm_.Cancel();
+            cq_.Shutdown();
+            async_next(gpr_infinite_timespec(), -1);
+        }
+
+    private:
+        size_t async_next(gpr_timespec deadline, size_t limit)
+        {
+            // There is a race between posting to grpc queue and it being able to react to it.
+            // Happens with a timer that is set to be expired, yet immediate AsyncNext will timeout
+            // without event. Using limit and deadline to provide behavior that is needed to implement
+            // stop(), run_one() and poll_one().
+            
+            assert(limit != 0);
+
+            void* tag;
+            bool ok;
+            size_t dispatched = 0;
+
+            while (true)
+            {
+                switch (cq_.AsyncNext(&tag, &ok, deadline))
+                {
+                case grpc::CompletionQueue::GOT_EVENT:
+                    dispatched += dispatch(tag, ok);
+                    if (dispatched >= limit)
+                        return dispatched;
+                    break;
+                case grpc::CompletionQueue::SHUTDOWN:
+                case grpc::CompletionQueue::TIMEOUT:
+                    return dispatched;
+                default:
+                    std::abort();
+                }
+            }
         }
 
         size_t dispatch(void* tag, bool ok)
@@ -114,6 +119,14 @@ namespace grpc_cb
 
             return 0;
         }
+
+        std::unique_ptr< io_handler_base > handler_cast(void* tag)
+        {
+            return std::unique_ptr< io_handler_base >(reinterpret_cast<io_handler_base*>(tag));
+        }
+
+        gpr_timespec gpr_zero_timespec() { return gpr_timespec{ 0, 0, GPR_TIMESPAN }; }
+        gpr_timespec gpr_infinite_timespec() { return gpr_timespec{ std::numeric_limits< int64_t >::max(), 0, GPR_TIMESPAN}; }
 
         grpc::CompletionQueue cq_;
 

@@ -79,7 +79,7 @@ static void grpc_cb_post_thread(benchmark::State& state)
     std::atomic< bool > stop = false;
     std::thread thread([&]
     {
-        while(!stop) context.poll(); // TODO: need run() that will respect work.
+        context.run();
     });
 
     int counter = 0;
@@ -88,7 +88,7 @@ static void grpc_cb_post_thread(benchmark::State& state)
         context.post([&] { ++counter; });
     }
 
-    stop = true;
+    context.stop();
     thread.join();
 
     state.SetItemsProcessed(counter);
