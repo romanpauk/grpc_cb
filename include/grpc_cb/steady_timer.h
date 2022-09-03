@@ -35,21 +35,16 @@ namespace grpc_cb
         {
             // Cancels are async, so to support cancel/async_wait/cancel/async_wait,
             // handlers have to be owned by io_context and submitted under different tags
-            // (this is a reason we cannot simply have virtual process(bool) on this class).
-
-            // TODO: now how to get rid of the new() here... we need to accomodate for different
-            // types of handlers, but most of them will have some reasonable size, so we can just
-            // ugly-cast it and cache the underlying memory allocations in stack<>.
-
+            // (this is a reason we cannot simply have virtual process(bool) on this class.
             auto tag = context_.make_handler(std::forward< WaitHandler >(handler));
             alarm_.Set(context_, deadline_, tag.get());
             tag.release();
         }
 
-        // TODO: cancel should return if handler was cancelled or not. But there is no way
-        // to find out.
         void cancel()
         {
+            // TODO: cancel should return if handler was cancelled or not. But there is no way
+            // to find out.
             alarm_.Cancel();
         }
 

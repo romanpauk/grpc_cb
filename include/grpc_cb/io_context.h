@@ -27,12 +27,12 @@ namespace grpc_cb
 
         operator grpc::CompletionQueue* () { return &cq_; }
 
-        size_t run_one() { return async_next(gpr_infinite_timespec(), 1); }
-        size_t run() { return async_next(gpr_infinite_timespec(), -1); }
+        size_t run_one() { return dispatch_handlers(infinite_timespec(), 1); }
+        size_t run() { return dispatch_handlers(infinite_timespec(), -1); }
 
         // TODO: can't get those correct due to race to be usable in tests
-        //size_t poll_one() { return async_next(gpr_zero_timespec(), 1); }
-        //size_t poll() { return async_next(gpr_zero_timespec(), -1); }
+        //size_t poll_one() { return dispatch_handlers(zero_timespec(), 1); }
+        //size_t poll() { return dispatch_handlers(zero_timespec(), -1); }
         
         template < typename Handler > auto make_handler(Handler&& handler)
         {
@@ -43,25 +43,23 @@ namespace grpc_cb
 
         template< typename Handler > void post(Handler&& handler)
         {
-            bool empty = true;
-            {
-                std::lock_guard lock(mutex_);
-                empty = handlers_.empty();
-                handlers_.emplace_back(std::forward< Handler >(handler));
-            }
-            if (empty)
-                handlers_alarm_.Set(&cq_, gpr_now(GPR_CLOCK_PRECISE), &handlers_alarm_);
+            std::lock_guard lock(mutex_);
+            bool empty = handlers_.empty();
+            handlers_.emplace_back(std::forward< Handler >(handler));
+            if(empty)
+                handlers_alarm_.Set(&cq_, zero_timespec(), &handlers_alarm_);
         }
 
         void stop()
         {
             handlers_alarm_.Cancel();
             cq_.Shutdown();
-            async_next(gpr_infinite_timespec(), -1);
+            dispatch_handlers(infinite_timespec(), -1);
+            assert(handlers_.empty());
         }
 
     private:
-        size_t async_next(gpr_timespec deadline, size_t limit)
+        size_t dispatch_handlers(gpr_timespec deadline, size_t limit)
         {
             // There is a race between posting to grpc queue and it being able to react to it.
             // Happens with a timer that is set to be expired, yet immediate AsyncNext will timeout
@@ -73,47 +71,82 @@ namespace grpc_cb
             void* tag;
             bool ok;
             size_t dispatched = 0;
-
+                        
             while (true)
             {
                 switch (cq_.AsyncNext(&tag, &ok, deadline))
                 {
                 case grpc::CompletionQueue::GOT_EVENT:
-                    dispatched += dispatch(tag, ok);
-                    if (dispatched >= limit)
-                        return dispatched;
+                    if (tag != &handlers_alarm_)
+                    {
+                        assert(dispatched < limit);
+                        dispatched += run_tagged_handler(tag, ok);
+                        if(dispatched == limit)
+                            return dispatched;
+                    }
                     break;
-                case grpc::CompletionQueue::SHUTDOWN:
                 case grpc::CompletionQueue::TIMEOUT:
+                    return dispatched;
+                case grpc::CompletionQueue::SHUTDOWN:
                     return dispatched;
                 default:
                     std::abort();
                 }
+
+                if (ok)
+                {
+                    // Drain as many posted handlers as limit allows, for rest, schedule a new timer.
+                    while (true)
+                    {
+                        assert(dispatched < limit);
+                        if (run_untagged_handler())
+                        {
+                            if (++dispatched == limit)
+                            {
+                                std::lock_guard lock(mutex_);
+                                if (!handlers_.empty())
+                                {
+                                    // If there are handlers and we are leaving, schedule new alarm no matter what.
+                                    // Cancel previous one if it is scheduled.
+                                    // TODO: not sure if it makes sense to track if timer is scheduled properly or not.
+                                    handlers_alarm_.Cancel();
+                                    handlers_alarm_.Set(&cq_, zero_timespec(), &handlers_alarm_);
+                                }
+                                    
+                                return dispatched;
+                            }
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                }
             }
         }
 
-        size_t dispatch(void* tag, bool ok)
+        size_t run_tagged_handler(void* tag, bool ok)
         {
-            if (tag == &handlers_alarm_)
+            auto handler = handler_cast(tag);
+            handler->process(ok);
+            return 1;
+        }
+
+        size_t run_untagged_handler()
+        {
+            std::function< void() > handler;
             {
-                if (ok)
+                std::lock_guard lock(mutex_);
+                if (!handlers_.empty())
                 {
-                    std::deque< std::function< void() > > handlers;
-                    {
-                        std::lock_guard lock(mutex_);
-                        handlers = std::move(handlers_);
-                    }
-
-                    for (auto& handler : handlers)
-                        handler();
-
-                    return handlers.size();
+                    handler = std::move(handlers_.front());
+                    handlers_.pop_front();
                 }
             }
-            else
+
+            if (handler)
             {
-                auto handler = handler_cast(tag);
-                handler->process(ok);
+                handler();
                 return 1;
             }
 
@@ -125,8 +158,8 @@ namespace grpc_cb
             return std::unique_ptr< io_handler_base >(reinterpret_cast<io_handler_base*>(tag));
         }
 
-        gpr_timespec gpr_zero_timespec() { return gpr_timespec{ 0, 0, GPR_TIMESPAN }; }
-        gpr_timespec gpr_infinite_timespec() { return gpr_timespec{ std::numeric_limits< int64_t >::max(), 0, GPR_TIMESPAN}; }
+        gpr_timespec zero_timespec() { return gpr_timespec{ 0, 0, GPR_TIMESPAN }; }
+        gpr_timespec infinite_timespec() { return gpr_timespec{ std::numeric_limits< int64_t >::max(), 0, GPR_TIMESPAN}; }
 
         grpc::CompletionQueue cq_;
 
