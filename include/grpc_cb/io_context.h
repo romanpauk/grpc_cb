@@ -27,12 +27,12 @@ namespace grpc_cb
 
         operator grpc::CompletionQueue* () { return &cq_; }
 
-        size_t run_one() { return async_next(gpr_infinite_timespec(), 1); }
-        size_t run() { return async_next(gpr_infinite_timespec(), -1); }
+        size_t run_one() { return dispatch_handlers(infinite_timespec(), 1); }
+        size_t run() { return dispatch_handlers(infinite_timespec(), -1); }
 
         // TODO: can't get those correct due to race to be usable in tests
-        //size_t poll_one() { return async_next(gpr_zero_timespec(), 1); }
-        //size_t poll() { return async_next(gpr_zero_timespec(), -1); }
+        //size_t poll_one() { return dispatch_handlers(zero_timespec(), 1); }
+        //size_t poll() { return dispatch_handlers(zero_timespec(), -1); }
         
         template < typename Handler > auto make_handler(Handler&& handler)
         {
@@ -50,18 +50,18 @@ namespace grpc_cb
                 handlers_.emplace_back(std::forward< Handler >(handler));
             }
             if (empty)
-                handlers_alarm_.Set(&cq_, gpr_zero_timespec(), &handlers_alarm_);
+                handlers_alarm_.Set(&cq_, zero_timespec(), &handlers_alarm_);
         }
 
         void stop()
         {
             handlers_alarm_.Cancel();
             cq_.Shutdown();
-            async_next(gpr_infinite_timespec(), -1);
+            dispatch_handlers(infinite_timespec(), -1);
         }
 
     private:
-        size_t async_next(gpr_timespec deadline, size_t limit)
+        size_t dispatch_handlers(gpr_timespec deadline, size_t limit)
         {
             // There is a race between posting to grpc queue and it being able to react to it.
             // Happens with a timer that is set to be expired, yet immediate AsyncNext will timeout
@@ -80,32 +80,16 @@ namespace grpc_cb
                 switch (cq_.AsyncNext(&tag, &ok, deadline))
                 {
                 case grpc::CompletionQueue::GOT_EVENT:
-                    if (tag == &handlers_alarm_)
+                    if (tag != &handlers_alarm_)
                     {
-                        if(ok)
-                            dispatched += dispatch_untagged_handler(remaining_handlers);
+                        if((dispatched += dispatch_tagged_handler(tag, ok)) == limit)
+                            return dispatched;
                     }
-                    else
-                    {
-                        dispatched += dispatch_tagged_handler(tag, ok);
-                    }
-
-                    if (dispatched == limit)
-                    {
-                        if(remaining_handlers)
-                            handlers_alarm_.Set(&cq_, gpr_zero_timespec(), &handlers_alarm_);
-
-                        return dispatched;
-                    }
-
                     break;
-
                 case grpc::CompletionQueue::TIMEOUT:
                     return dispatched;
-
                 case grpc::CompletionQueue::SHUTDOWN:
                     return dispatched;
-
                 default:
                     std::abort();
                 }
@@ -113,20 +97,15 @@ namespace grpc_cb
                 if (ok)
                 {
                     // Drain as many posted handlers as limit allows, for rest, schedule a new timer.
-                    // (scheduling timers is expensive).
-                    //
-                    // TODO: ideally we do all handlers under limit at once. But that could starve the other events.
-                    // So, after initial wake up, we should do one handler/event/handler/event
+                    // (as scheduling timers is expensive).
                     while (true)
                     {
                         if (dispatch_untagged_handler(remaining_handlers))
                         {
-                            ++dispatched;
-                            if (dispatched == limit)
+                            if (++dispatched == limit)
                             {
                                 if (remaining_handlers)
-                                    handlers_alarm_.Set(&cq_, gpr_zero_timespec(), &handlers_alarm_);
-
+                                    handlers_alarm_.Set(&cq_, zero_timespec(), &handlers_alarm_);
                                 return dispatched;
                             }
                         }
@@ -175,8 +154,8 @@ namespace grpc_cb
             return std::unique_ptr< io_handler_base >(reinterpret_cast<io_handler_base*>(tag));
         }
 
-        gpr_timespec gpr_zero_timespec() { return gpr_timespec{ 0, 0, GPR_TIMESPAN }; }
-        gpr_timespec gpr_infinite_timespec() { return gpr_timespec{ std::numeric_limits< int64_t >::max(), 0, GPR_TIMESPAN}; }
+        gpr_timespec zero_timespec() { return gpr_timespec{ 0, 0, GPR_TIMESPAN }; }
+        gpr_timespec infinite_timespec() { return gpr_timespec{ std::numeric_limits< int64_t >::max(), 0, GPR_TIMESPAN}; }
 
         grpc::CompletionQueue cq_;
 
