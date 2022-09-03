@@ -43,13 +43,10 @@ namespace grpc_cb
 
         template< typename Handler > void post(Handler&& handler)
         {
-            bool empty = true;
-            {
-                std::lock_guard lock(mutex_);
-                empty = handlers_.empty();
-                handlers_.emplace_back(std::forward< Handler >(handler));
-            }
-            if (empty)
+            std::lock_guard lock(mutex_);
+            bool empty = handlers_.empty();
+            handlers_.emplace_back(std::forward< Handler >(handler));
+            if(empty)
                 handlers_alarm_.Set(&cq_, zero_timespec(), &handlers_alarm_);
         }
 
@@ -58,6 +55,7 @@ namespace grpc_cb
             handlers_alarm_.Cancel();
             cq_.Shutdown();
             dispatch_handlers(infinite_timespec(), -1);
+            assert(handlers_.empty());
         }
 
     private:
@@ -73,8 +71,7 @@ namespace grpc_cb
             void* tag;
             bool ok;
             size_t dispatched = 0;
-            bool remaining_handlers = false;
-            
+                        
             while (true)
             {
                 switch (cq_.AsyncNext(&tag, &ok, deadline))
@@ -82,7 +79,9 @@ namespace grpc_cb
                 case grpc::CompletionQueue::GOT_EVENT:
                     if (tag != &handlers_alarm_)
                     {
-                        if((dispatched += dispatch_tagged_handler(tag, ok)) == limit)
+                        assert(dispatched < limit);
+                        dispatched += run_tagged_handler(tag, ok);
+                        if(dispatched == limit)
                             return dispatched;
                     }
                     break;
@@ -97,15 +96,23 @@ namespace grpc_cb
                 if (ok)
                 {
                     // Drain as many posted handlers as limit allows, for rest, schedule a new timer.
-                    // (as scheduling timers is expensive).
                     while (true)
                     {
-                        if (dispatch_untagged_handler(remaining_handlers))
+                        assert(dispatched < limit);
+                        if (run_untagged_handler())
                         {
                             if (++dispatched == limit)
                             {
-                                if (remaining_handlers)
+                                std::lock_guard lock(mutex_);
+                                if (!handlers_.empty())
+                                {
+                                    // If there are handlers and we are leaving, schedule new alarm no matter what.
+                                    // Cancel previous one if it is scheduled.
+                                    // TODO: not sure if it makes sense to track if timer is scheduled properly or not.
+                                    handlers_alarm_.Cancel();
                                     handlers_alarm_.Set(&cq_, zero_timespec(), &handlers_alarm_);
+                                }
+                                    
                                 return dispatched;
                             }
                         }
@@ -118,14 +125,14 @@ namespace grpc_cb
             }
         }
 
-        size_t dispatch_tagged_handler(void* tag, bool ok)
+        size_t run_tagged_handler(void* tag, bool ok)
         {
             auto handler = handler_cast(tag);
             handler->process(ok);
             return 1;
         }
 
-        size_t dispatch_untagged_handler(bool& remaining)
+        size_t run_untagged_handler()
         {
             std::function< void() > handler;
             {
@@ -134,7 +141,6 @@ namespace grpc_cb
                 {
                     handler = std::move(handlers_.front());
                     handlers_.pop_front();
-                    remaining = !handlers_.empty();
                 }
             }
 
@@ -143,10 +149,8 @@ namespace grpc_cb
                 handler();
                 return 1;
             }
-            else
-            {
-                return 0;
-            }
+
+            return 0;
         }
 
         std::unique_ptr< io_handler_base > handler_cast(void* tag)
